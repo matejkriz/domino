@@ -7,11 +7,12 @@ class Gameset { // ~vstup
   constructor() {
     this.games = [];
   }
-  private getLines(inputFile, callback){
+  private getFileLines(inputFile, callback){
     if (process.argv.length < 3) {
       console.log('Usage: node ' + process.argv[1] + ' inputFile (outputFile)');
       process.exit(1);
     }
+    console.log('vstup:');
     let self = this;
     return fs.readFile(inputFile, 'utf8', function(err, data) {
       if (err) throw err;
@@ -20,6 +21,7 @@ class Gameset { // ~vstup
     });
   }
   private processLines(lines, self) {
+    console.log('\nvýstup:');
     self.gamesCount = parseInt(lines.shift());
     self.loadGames(lines, self);
   }
@@ -28,14 +30,11 @@ class Gameset { // ~vstup
     for(let i = 1; i <= self.gamesCount; i++){
       line = lines.shift();
       let [distance, tilesCount] = line.split(' ');
-      console.log('tilesCount: ', tilesCount);
       let tiles = [];
       while(lines.length > 0 && lines[0] !== ''){
         line = lines.shift();
         tiles.push(new Tile(...line.split(' ')));
       }
-      console.log('tiles: ', tiles);
-      console.log('i lines[0]: ', i, ', ', lines[0]);
       if(lines[0] === '') {
         lines.shift();
       }
@@ -50,15 +49,15 @@ class Gameset { // ~vstup
         )
       );
     }
-    console.log('self.games: ', self.games);
+
   }
   loadGameset() {
     let inputFile = process.argv[2];
     this.outputFile = process.argv.length > 3 ? process.argv[3] : 'output.txt';
-    this.getLines(inputFile, this.processLines);
+    this.getFileLines(inputFile, this.processLines);
   }
   printResults() {
-    for(let game of this.games){
+    for(let game of this.games) {
       game.printResult();
     }
   }
@@ -88,7 +87,7 @@ class Game implements GameInterface {
     name: string,
     distance: number,
     tilesCount: number,
-    firstTile: number,
+    firstTile: TileInterface,
     lastTile: TileInterface,
     restTiles: TileInterface[]
   ) {
@@ -98,20 +97,36 @@ class Game implements GameInterface {
     this.firstTile = firstTile;
     this.lastTile = lastTile;
     this.restTiles = restTiles;
+    this.result = new Result(this.name);
+    this.findResult();
   }
-  findResult() {
-    // TODO
-    console.warn('Not implemented yet!');
+
+  findResult():Result {
+    let solver = new DominoSolver(this.distance);
+    let solution = solver.findSolution(this.firstTile, this.lastTile, this.restTiles);
+    if(solution){
+      solution.unshift(this.firstTile);
+      solution.push(this.lastTile);
+      this.result.tileSeries = solution;
+      this.result.isExisting = true;
+    } else {
+      this.result.isExisting = false;
+    }
+    this.printResult();
     return this.result;
   }
   printResult():string {
-    return this.result.print();
+    const resultText = this.result.print();
+    console.log(resultText);
+    return resultText;
   }
 }
 
 class TileInterface {
   a: number; // dots count
   b: number; // dots count
+  couldFollow:(value:number)=>boolean;
+  flip:()=>void;
   print:()=>string;
 }
 
@@ -122,23 +137,78 @@ class Tile implements TileInterface {
     this.a = a;
     this.b = b;
   }
+  couldFollow(value:number):boolean {
+    return value === this.a || value === this.b;
+  }
+  flip():void {
+    let a = this.a;
+    this.a = this.b;
+    this.b = a;
+  }
   print():string {
     return ` (${this.a},${this.b})`;
   }
 }
 
+class DominoSolver {
+  distance: number;
+  constructor(distance) {
+    this.distance = distance;
+  }
+
+  hasProperLength(solution) {
+    const deviation = solution.length - this.distance;
+    const condNecessary = deviation >= 0
+    const condConnections = deviation % 2 === 0;
+    return condNecessary && condConnections;
+  }
+
+  findNext(previous, last, options, solution) {
+    if(options.length <= 0) {
+      return false;
+    }
+
+    for(let index in options){
+      if(options[index].couldFollow(this.lastValue(previous))) {
+        if(previous.b !== options[index].a) {
+          options[index].flip();
+        }
+        solution.push(options[index]);
+        if(this.hasProperLength(solution) && this.reachEnd(solution, last)){
+          return solution;
+        } else {
+          let restOptions = options.slice(parseInt(index) + 1);
+          return this.findNext(options[index], last, restOptions, solution);
+        }
+      }
+    }
+  }
+
+  findSolution(firstTile, lastTile, restTiles) {
+    return this.findNext(firstTile, lastTile, restTiles, []);
+  }
+
+  lastValue(tile){
+    return tile.b;
+  }
+
+  reachEnd(solution, last){
+    return solution[solution.length - 1].b === last.a;
+  }
+}
+
 class Result { // ~vystup
   gameName: string;
+  isExisting: boolean;
   tileSeries: TileInterface[];
   constructor(gameName: string) {
     this.gameName = gameName;
+    this.isExisting = false;
   }
-  exist():boolean {
-    return this.tileSeries.length > 0; // FIXME
-  }
+
   printSeries():string {
-    if(this.exist()){
-      let series:string;
+    if(this.isExisting){
+      let series:string = "";
       for(let tile of this.tileSeries){
         series += tile.print();
       }
@@ -148,7 +218,7 @@ class Result { // ~vystup
     }
   }
   print():string {
-    return `Řešení ${this.gameName}: ${this.printSeries()}\n`;
+    return `Řešení ${this.gameName}: ${this.printSeries()}`;
   }
 }
 
